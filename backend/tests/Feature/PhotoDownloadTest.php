@@ -20,8 +20,10 @@ class PhotoDownloadTest extends TestCase
         Storage::fake('public');
     }
 
-    public function test_original_of_an_uploaded_photo_is_downloaded_unchanged(): void
+    public function test_original_of_an_uploaded_photo_is_downloaded_unchanged_when_originals_are_kept(): void
     {
+        config(['photos.download.keep_originals' => true]);
+
         $upload = $this->postJson('/api/photos', [
             'photo' => UploadedFile::fake()->image('photo.jpg', 800, 600),
         ])->assertAccepted();
@@ -35,6 +37,51 @@ class PhotoDownloadTest extends TestCase
             Storage::disk('local')->get($photo->original_path),
             $response->streamedContent(),
         );
+    }
+
+    public function test_by_default_a_large_upload_is_downloaded_as_a_smaller_jpeg_and_the_original_is_deleted(): void
+    {
+        $upload = $this->postJson('/api/photos', [
+            'photo' => UploadedFile::fake()->image('big.png', 4000, 3000),
+        ])->assertAccepted();
+
+        $photo = Photo::where('uuid', $upload->json('uuid'))->firstOrFail();
+
+        Storage::disk('local')->assertMissing($photo->original_path);
+        Storage::disk('local')->assertExists(Photo::downloadPathFor($photo->original_path));
+
+        $response = $this->get("/api/photos/{$photo->uuid}/download")->assertOk();
+        $bytes = $response->streamedContent();
+        $size = getimagesizefromstring($bytes);
+
+        $this->assertSame(IMAGETYPE_JPEG, $size[2]);
+        $this->assertSame([3000, 2250], [$size[0], $size[1]]);
+        $this->assertStringContainsString('.jpg', $response->headers->get('Content-Disposition'));
+        $this->assertStringContainsString('image/jpeg', $response->headers->get('Content-Type'));
+    }
+
+    public function test_download_copy_is_preferred_over_the_original_when_both_exist(): void
+    {
+        $photo = $this->storedPhoto('image/png');
+        Storage::disk('local')->put(Photo::downloadPathFor($photo->original_path), 'download-copy');
+
+        $response = $this->get("/api/photos/{$photo->uuid}/download")->assertOk();
+
+        $this->assertSame('download-copy', $response->streamedContent());
+        $this->assertStringContainsString('.jpg', $response->headers->get('Content-Disposition'));
+    }
+
+    public function test_original_is_served_when_originals_are_kept_even_if_a_download_copy_exists(): void
+    {
+        config(['photos.download.keep_originals' => true]);
+
+        $photo = $this->storedPhoto('image/png');
+        Storage::disk('local')->put(Photo::downloadPathFor($photo->original_path), 'download-copy');
+
+        $response = $this->get("/api/photos/{$photo->uuid}/download")->assertOk();
+
+        $this->assertSame('original-bytes-'.$photo->uuid, $response->streamedContent());
+        $this->assertStringContainsString('.png', $response->headers->get('Content-Disposition'));
     }
 
     public function test_download_is_sent_as_an_attachment_with_a_generated_file_name(): void

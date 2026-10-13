@@ -43,4 +43,12 @@ class Photo extends Model
     {
         return $query->where('status', self::STATUS_PROCESSED);
     }
+
+    /**
+     * Where the JPEG download copy lives, next to the original (private disk).
+     */
+    public static function downloadPathFor(string $originalPath): string
+    {
+        return dirname($originalPath).'/download.jpg';
+    }
 }

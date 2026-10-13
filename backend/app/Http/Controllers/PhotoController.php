@@ -166,21 +166,31 @@ class PhotoController extends Controller
     }
 
     /**
-     * Download the original, full-quality file of a processed photo.
+     * Download the high quality copy of a processed photo.
      *
-     * The original is stored without an extension, so the file name is built
-     * from the detected mime type. The original is streamed from private
-     * storage and keeps its metadata (including GPS, if the phone recorded it).
+     * New photos have a JPEG download copy (see config photos.download). Photos
+     * processed before that existed, or when originals are kept, fall back to
+     * the raw original, which keeps its metadata (including GPS) and has no
+     * file extension on disk, so its name is built from the mime type.
      */
     public function download(string $uuid): Response
     {
         $photo = Photo::processed()->where('uuid', $uuid)->firstOrFail();
 
         $disk = Storage::disk('local');
+        $downloadPath = Photo::downloadPathFor($photo->original_path);
 
-        abort_unless($disk->exists($photo->original_path), 404);
+        if ($disk->exists($downloadPath) && ! config('photos.download.keep_originals')) {
+            $path = $downloadPath;
+            $mimeType = 'image/jpeg';
+        } else {
+            abort_unless($disk->exists($photo->original_path), 404);
 
-        $extension = self::DOWNLOAD_EXTENSIONS[$photo->mime_type] ?? 'jpg';
+            $path = $photo->original_path;
+            $mimeType = $photo->mime_type;
+        }
+
+        $extension = self::DOWNLOAD_EXTENSIONS[$mimeType] ?? 'jpg';
         $fileName = sprintf(
             'foto-%s-%s.%s',
             $photo->created_at->format('Ymd-His'),
@@ -188,8 +198,8 @@ class PhotoController extends Controller
             $extension,
         );
 
-        return $disk->download($photo->original_path, $fileName, [
-            'Content-Type' => $photo->mime_type,
+        return $disk->download($path, $fileName, [
+            'Content-Type' => $mimeType,
             'Cache-Control' => 'private, max-age=0',
         ]);
     }

@@ -40,6 +40,7 @@ class ProcessPhotoJob implements ShouldQueue
 
         Storage::disk('public')->put($webPath, $result['web']);
         Storage::disk('public')->put($thumbPath, $result['thumb']);
+        Storage::disk('local')->put(Photo::downloadPathFor($this->photo->original_path), $result['download']);
 
         $this->photo->update([
             'status' => Photo::STATUS_PROCESSED,
@@ -49,6 +50,29 @@ class ProcessPhotoJob implements ShouldQueue
             'height' => $result['height'],
             'size_bytes' => strlen($result['web']),
         ]);
+
+        $this->removeOriginalUnlessKept();
+    }
+
+    /**
+     * Delete the raw upload once the download copy is safely stored.
+     *
+     * A failure here is only logged: the photo is already fully usable.
+     */
+    private function removeOriginalUnlessKept(): void
+    {
+        if (config('photos.download.keep_originals')) {
+            return;
+        }
+
+        try {
+            Storage::disk('local')->delete($this->photo->original_path);
+        } catch (Throwable $exception) {
+            Log::warning('Could not delete the original after processing', [
+                'photo_uuid' => $this->photo->uuid,
+                'exception' => $exception->getMessage(),
+            ]);
+        }
     }
 
     /**

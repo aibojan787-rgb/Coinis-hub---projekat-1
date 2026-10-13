@@ -46,6 +46,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Download copy
+    |--------------------------------------------------------------------------
+    |
+    | The file guests get when they press "Preuzmi": a high quality JPEG, at
+    | most max_edge pixels on the long side, without metadata (no GPS). It is
+    | much smaller than the raw phone photo and looks the same on a screen and
+    | in normal prints. JPEG because every app and printer opens it.
+    |
+    | keep_originals: false deletes the raw upload once the download copy is
+    | saved, which saves most of the disk space. true keeps the raw file too
+    | (full size, with GPS), and the download then serves the raw file.
+    |
+    */
+
+    'download' => [
+        'max_edge' => (int) env('PHOTOS_DOWNLOAD_MAX_EDGE', 3000),
+        'quality' => (int) env('PHOTOS_DOWNLOAD_QUALITY', 90),
+        'keep_originals' => filter_var(env('PHOTOS_KEEP_ORIGINALS', false), FILTER_VALIDATE_BOOL),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Gallery and polling
     |--------------------------------------------------------------------------
     */

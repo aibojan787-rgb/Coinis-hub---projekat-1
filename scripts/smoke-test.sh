@@ -5,7 +5,7 @@
 # It talks to the app over HTTP exactly like a phone would: it uploads a real
 # photo, waits for the queue worker to process it, checks that the gallery,
 # the processed images and the live-update endpoint show it, and downloads the
-# original back and compares it byte for byte.
+# download back: either the untouched original or the JPEG download copy.
 #
 # Usage:
 #   bash scripts/smoke-test.sh https://server.tailaa4397.ts.net:14443
@@ -335,15 +335,22 @@ else
             *) bad "download is sent as an attachment" "Content-Disposition was '$DISPOSITION'" ;;
         esac
 
-        case "$DISPOSITION" in
-            *.png*) ok "download file name has the right extension (.png)" ;;
-            *) bad "download file name has the right extension (.png)" "Content-Disposition was '$DISPOSITION'" ;;
-        esac
+        # By default the server hands out a high quality JPEG copy; with
+        # PHOTOS_KEEP_ORIGINALS=true it hands out the untouched upload (.png here).
+        MAGIC="$(head -c 3 "$WORK/download.body" | od -An -tx1 | tr -d ' \n')"
 
         if cmp -s "$WORK/photo.png" "$WORK/download.body"; then
-            ok "downloaded file is identical to the uploaded original"
+            case "$DISPOSITION" in
+                *.png*) ok "download is the untouched original (originals are kept)" ;;
+                *) bad "download file name has the right extension (.png)" "Content-Disposition was '$DISPOSITION'" ;;
+            esac
+        elif [ "$MAGIC" = "ffd8ff" ]; then
+            case "$DISPOSITION" in
+                *.jpg*) ok "download is a JPEG copy with a .jpg name" ;;
+                *) bad "download JPEG has a .jpg name" "Content-Disposition was '$DISPOSITION'" ;;
+            esac
         else
-            bad "downloaded file is identical to the uploaded original" "the downloaded bytes differ from what was uploaded"
+            bad "download is the original or a JPEG copy" "the file starts with bytes '$MAGIC', which is neither the upload nor a JPEG"
         fi
     fi
 fi

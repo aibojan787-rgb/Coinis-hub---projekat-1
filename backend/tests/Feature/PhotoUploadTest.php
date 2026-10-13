@@ -31,7 +31,8 @@ class PhotoUploadTest extends TestCase
         $photo = Photo::where('uuid', $response->json('uuid'))->firstOrFail();
 
         $this->assertSame(Photo::STATUS_PROCESSED, $photo->status);
-        Storage::disk('local')->assertExists($photo->original_path);
+        Storage::disk('local')->assertExists(Photo::downloadPathFor($photo->original_path));
+        Storage::disk('local')->assertMissing($photo->original_path);
         Storage::disk('public')->assertExists($photo->web_path);
         Storage::disk('public')->assertExists($photo->thumb_path);
     }

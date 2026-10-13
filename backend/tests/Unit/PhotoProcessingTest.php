@@ -80,6 +80,38 @@ class PhotoProcessingTest extends TestCase
         $this->assertStringNotContainsString('Cam', $result['thumb']);
     }
 
+    public function test_download_copy_is_a_jpeg_scaled_down_to_3000_px(): void
+    {
+        $result = (new ImageProcessor)->process($this->jpegFile(4000, 3000));
+
+        $this->assertSame([3000, 2250], $this->dimensionsOf($result['download']));
+        $this->assertSame(IMAGETYPE_JPEG, $this->imageTypeOf($result['download']));
+    }
+
+    public function test_small_images_are_not_upscaled_for_the_download_copy(): void
+    {
+        $result = (new ImageProcessor)->process($this->jpegFile(800, 600));
+
+        $this->assertSame([800, 600], $this->dimensionsOf($result['download']));
+    }
+
+    public function test_download_copy_has_no_camera_or_gps_metadata_and_is_upright(): void
+    {
+        $result = (new ImageProcessor)->process($this->jpegFile(300, 100, orientation: 6, withMetadata: true));
+
+        $this->assertSame([100, 300], $this->dimensionsOf($result['download']));
+        $this->assertStringNotContainsString('Cam', $result['download']);
+        $this->assertStringNotContainsString('Exif', $result['download']);
+    }
+
+    public function test_download_copy_is_not_larger_than_the_source(): void
+    {
+        $path = $this->jpegFile(3000, 2000);
+        $result = (new ImageProcessor)->process($path);
+
+        $this->assertLessThanOrEqual(filesize($path), strlen($result['download']));
+    }
+
     public function test_failed_job_marks_the_photo_as_failed(): void
     {
         $photo = Photo::factory()->pending()->create();
