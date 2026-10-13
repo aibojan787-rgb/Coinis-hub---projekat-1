@@ -4,6 +4,10 @@ import type { Photo } from '../types'
 
 export const POLL_INTERVAL_MS = 5000
 
+// Each poll also asks for photos that finished this many seconds before the
+// last poll. This covers clock rounding; photos already shown are skipped.
+const SINCE_OVERLAP_SECONDS = 30
+
 function prependNewest(current: Photo[], incoming: Photo[]): Photo[] {
   const known = new Set(current.map((photo) => photo.uuid))
   const fresh = incoming.filter((photo) => !known.has(photo.uuid))
@@ -23,6 +27,7 @@ export function useGallery() {
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
   const latestIdRef = useRef(0)
+  const sinceRef = useRef(0)
   const isLoadingMoreRef = useRef(false)
 
   useEffect(() => {
@@ -35,6 +40,7 @@ export function useGallery() {
         }
 
         latestIdRef.current = page.latest_id
+        sinceRef.current = page.server_time
         setPhotos(page.data)
         setNextPath(page.links.next)
         setHasError(false)
@@ -67,9 +73,18 @@ export function useGallery() {
       }
 
       try {
-        const updates = await fetchUpdates(latestIdRef.current)
+        const updates = await fetchUpdates(latestIdRef.current, sinceRef.current - SINCE_OVERLAP_SECONDS)
 
-        if (!updates || updates.data.length === 0) {
+        if (!updates) {
+          return
+        }
+
+        // When the answer was cut short, keep the old moment so nothing is skipped.
+        if (!updates.has_more) {
+          sinceRef.current = updates.server_time
+        }
+
+        if (updates.data.length === 0) {
           return
         }
 

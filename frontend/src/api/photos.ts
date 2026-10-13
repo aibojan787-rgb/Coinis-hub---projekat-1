@@ -71,8 +71,12 @@ export function fetchGalleryPage(path = '/api/photos'): Promise<GalleryPage | nu
   return getJson<GalleryPage>(toApiPath(path))
 }
 
-export function fetchUpdates(afterId: number): Promise<UpdatesPage | null> {
-  return getJson<UpdatesPage>(`/api/photos/updates?after_id=${afterId}`)
+/**
+ * `since` (unix time) also returns photos that finished processing after that
+ * moment even if their id is lower than `afterId` (workers finish out of order).
+ */
+export function fetchUpdates(afterId: number, since: number): Promise<UpdatesPage | null> {
+  return getJson<UpdatesPage>(`/api/photos/updates?after_id=${afterId}&since=${Math.max(0, Math.floor(since))}`)
 }
 
 export async function fetchPhoto(uuid: string): Promise<Photo | null> {

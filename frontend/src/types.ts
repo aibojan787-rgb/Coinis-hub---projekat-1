@@ -15,10 +15,13 @@ export interface GalleryPage {
   data: Photo[]
   links: { next: string | null }
   latest_id: number
+  server_time: number
 }
 
 export interface UpdatesPage {
   data: UpdatedPhoto[]
+  server_time: number
+  has_more: boolean
 }
 
 export interface SinglePhoto {

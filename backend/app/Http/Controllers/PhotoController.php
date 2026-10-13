@@ -7,6 +7,8 @@ use App\Http\Resources\PhotoResource;
 use App\Http\Resources\PhotoUpdateResource;
 use App\Jobs\ProcessPhotoJob;
 use App\Models\Photo;
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -82,29 +84,59 @@ class PhotoController extends Controller
 
         return PhotoResource::collection($photos)->additional([
             'latest_id' => (int) Photo::processed()->max('id'),
+            'server_time' => now()->timestamp,
         ]);
     }
 
     /**
-     * Return processed photos added after the given internal id, for polling.
+     * Return processed photos the client has not seen yet, for polling.
+     *
+     * Two workers can finish photos out of order, so a photo with a LOWER id
+     * can become ready after one with a higher id. Asking only for
+     * "id greater than after_id" would miss it forever. The optional `since`
+     * (unix time) also returns every photo that finished processing at or
+     * after that moment, whatever its id. The client sends the `server_time`
+     * of its last poll (minus a small overlap) and skips photos it already has.
+     *
+     * `has_more` is true when the limit cut the list short: the client must
+     * then keep its old `since` and ask again.
      */
     public function updates(Request $request): JsonResponse
     {
         $validated = $request->validate([
             'after_id' => ['required', 'integer', 'min:0'],
+            'since' => ['sometimes', 'integer', 'min:0'],
         ]);
 
         $afterId = (int) $validated['after_id'];
+        $since = isset($validated['since']) ? (int) $validated['since'] : null;
+        $limit = (int) config('photos.updates_limit');
+
         $latestId = (int) Photo::processed()->max('id');
+        $latestChange = (string) Photo::processed()->max('updated_at');
 
         $photos = Photo::processed()
-            ->where('id', '>', $afterId)
+            ->where(function (Builder $query) use ($afterId, $since): void {
+                $query->where('id', '>', $afterId);
+
+                if ($since !== null) {
+                    $query->orWhere('updated_at', '>=', Carbon::createFromTimestamp($since));
+                }
+            })
             ->orderBy('id')
-            ->limit(config('photos.updates_limit'))
+            ->limit($limit + 1)
             ->get();
 
-        $response = PhotoUpdateResource::collection($photos)->response($request);
-        $response->setEtag(md5("{$afterId}:{$latestId}"));
+        $hasMore = $photos->count() > $limit;
+
+        $response = PhotoUpdateResource::collection($photos->take($limit))
+            ->additional([
+                'server_time' => now()->timestamp,
+                'has_more' => $hasMore,
+            ])
+            ->response($request);
+
+        $response->setEtag(md5("{$afterId}:{$since}:{$latestId}:{$latestChange}"));
         $response->isNotModified($request);
 
         return $response;
