@@ -48,14 +48,29 @@ backend_tests() (
   php artisan test
 )
 
-if command -v php >/dev/null && php -r 'exit(PHP_VERSION_ID >= 80401 ? 0 : 1);'; then
-  if [ -d "$ROOT/backend/vendor" ] || command -v composer >/dev/null; then
-    run_step "Backend tests (php artisan test)" backend_tests
-  else
-    skip_step "Backend tests" "composer not found and backend/vendor missing"
-  fi
+# Same tests, but inside a throwaway container made from the app image (it has
+# PHP 8.4 with all extensions). The backend folder is mounted read-only and
+# copied, so nothing is written into your project.
+backend_tests_in_docker() {
+  docker run --rm -v "$ROOT/backend:/src:ro" --entrypoint sh photo-gallery:latest -c '
+    set -e
+    cp -r /src /tmp/app
+    cd /tmp/app
+    rm -f bootstrap/cache/*.php
+    composer install --no-interaction --prefer-dist
+    [ -f .env ] || cp .env.example .env
+    php artisan key:generate --no-interaction >/dev/null
+    php artisan test
+  '
+}
+
+if command -v php >/dev/null && php -r 'exit(PHP_VERSION_ID >= 80401 ? 0 : 1);' \
+   && { [ -d "$ROOT/backend/vendor" ] || command -v composer >/dev/null; }; then
+  run_step "Backend tests (php artisan test)" backend_tests
+elif command -v docker >/dev/null && docker image inspect photo-gallery:latest >/dev/null 2>&1; then
+  run_step "Backend tests (inside the app's Docker image)" backend_tests_in_docker
 else
-  skip_step "Backend tests" "PHP 8.4+ not found (run inside the container: docker compose exec app php artisan test)"
+  skip_step "Backend tests" "no PHP 8.4 here and no Docker image 'photo-gallery:latest' (run: docker compose build)"
 fi
 
 # ---- Frontend ---------------------------------------------------------------
