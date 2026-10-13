@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { UploadItem } from '../hooks/useUploads'
+import '../upload-errors.css'
 import type { Photo } from '../types'
 
 interface PhotoGridProps {
@@ -17,7 +18,8 @@ function UploadTile({ upload, onDismiss }: { upload: UploadItem; onDismiss: (id:
 
   if (isFailed) {
     return (
-      <div className="tile tile-failed">
+      <div className="tile tile-failed" role="alert">
+        <img className="tile-failed-preview" src={upload.previewUrl} alt="" />
         <span>{upload.error}</span>
         <button type="button" className="tile-dismiss" onClick={() => onDismiss(upload.id)}>
           Ukloni

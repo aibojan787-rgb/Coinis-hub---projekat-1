@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ApiError, fetchPhoto, uploadPhoto, validateFile } from '../api/photos'
+import { ApiError, fetchPhoto, fetchPhotoStatus, uploadPhoto, validateFile } from '../api/photos'
 import type { Photo } from '../types'
 import { POLL_INTERVAL_MS } from './useGallery'
 
@@ -109,11 +109,17 @@ export function useUploads(onProcessed: (photo: Photo) => void) {
         }
 
         try {
-          const photo = await fetchPhoto(item.uuid as string)
+          const status = await fetchPhotoStatus(item.uuid as string)
 
-          if (photo) {
-            onProcessedRef.current(photo)
-            removeItem(item.id)
+          if (status === 'failed') {
+            updateItem(item.id, { status: 'failed', error: 'Obrada fotografije nije uspjela. Pokušajte ponovo.' })
+          } else if (status === 'processed') {
+            const photo = await fetchPhoto(item.uuid as string)
+
+            if (photo) {
+              onProcessedRef.current(photo)
+              removeItem(item.id)
+            }
           }
         } catch {
           // Try again on the next tick.

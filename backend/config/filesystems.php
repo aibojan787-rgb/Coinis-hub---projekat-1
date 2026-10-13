@@ -7,10 +7,6 @@ return [
     | Default Filesystem Disk
     |--------------------------------------------------------------------------
     |
-    | Here you may specify the default filesystem disk that should be used
-    | by the framework. The "local" disk, as well as a variety of cloud
-    | based disks are available to your application for file storage.
-    |
     */
 
     'default' => env('FILESYSTEM_DISK', 'local'),
@@ -20,10 +16,6 @@ return [
     | Filesystem Disks
     |--------------------------------------------------------------------------
     |
-    | Below you may configure as many filesystem disks as necessary, and you
-    | may even configure multiple disks for the same driver. Examples for
-    | most supported storage drivers are configured here for reference.
-    |
     | Supported drivers: "local", "ftp", "sftp", "s3"
     |
     */
@@ -31,10 +23,12 @@ return [
     'disks' => [
 
         'local' => [
+            // Write errors (full disk, bad permissions) must raise an exception.
+            // With false they are silently ignored and photos look "processed" without files.
             'driver' => 'local',
             'root' => storage_path('app/private'),
             'serve' => true,
-            'throw' => false,
+            'throw' => true,
             'report' => false,
         ],
 
@@ -43,7 +37,7 @@ return [
             'root' => storage_path('app/public'),
             'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
             'visibility' => 'public',
-            'throw' => false,
+            'throw' => true,
             'report' => false,
         ],
 

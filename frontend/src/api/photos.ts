@@ -81,6 +81,84 @@ export async function fetchPhoto(uuid: string): Promise<Photo | null> {
   return body?.data ?? null
 }
 
+export type PhotoStatus = 'pending' | 'processed' | 'failed'
+
+/**
+ * Processing status of an uploaded photo, or null when the server does not know it.
+ */
+export async function fetchPhotoStatus(uuid: string): Promise<PhotoStatus | null> {
+  const body = await getJson<{ status: PhotoStatus }>(`/api/photos/${uuid}/status`)
+
+  return body?.status ?? null
+}
+
+export function downloadUrl(uuid: string): string {
+  return resolveUrl(`/api/photos/${uuid}/download`)
+}
+
+function extensionFor(mimeType: string): string {
+  const subtype = mimeType.split('/')[1] ?? 'jpeg'
+
+  return subtype === 'jpeg' ? 'jpg' : subtype
+}
+
+/**
+ * Normal browser download of the original, full-quality photo. The server
+ * answers with Content-Disposition: attachment, so the browser saves the file
+ * (Downloads folder) instead of opening it.
+ */
+export function downloadPhoto(uuid: string): void {
+  const link = document.createElement('a')
+  link.href = downloadUrl(uuid)
+  link.download = ''
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
+/**
+ * True when the browser can share files (phones). The share sheet offers
+ * "Save Image", which puts the photo straight into the photo library.
+ */
+export function canSharePhotos(): boolean {
+  return typeof navigator.share === 'function' && typeof navigator.canShare === 'function'
+}
+
+export type ShareOutcome = 'shared' | 'cancelled'
+
+/**
+ * Open the share sheet with the original photo.
+ *
+ * Throws ApiError when the server refuses the download, and rethrows other
+ * share errors. Closing the sheet is not an error ('cancelled').
+ */
+export async function sharePhoto(uuid: string): Promise<ShareOutcome> {
+  const response = await fetch(downloadUrl(uuid))
+
+  if (!response.ok) {
+    throw new ApiError(response.status, 'Preuzimanje nije uspjelo.')
+  }
+
+  const blob = await response.blob()
+  const file = new File([blob], `foto-${uuid.slice(0, 8)}.${extensionFor(blob.type)}`, { type: blob.type })
+
+  if (!navigator.canShare({ files: [file] })) {
+    throw new Error('Dijeljenje nije podržano.')
+  }
+
+  try {
+    await navigator.share({ files: [file] })
+
+    return 'shared'
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      return 'cancelled'
+    }
+
+    throw error
+  }
+}
+
 export interface UploadResult {
   uuid: string
 }
@@ -97,13 +175,51 @@ function parseBody(text: string): unknown {
   }
 }
 
+interface ValidationBody extends ErrorBody {
+  errors?: { photo?: string[] }
+}
+
+/**
+ * Maps the server's (English) validation message for the photo field to a
+ * clear message for the guest.
+ */
+function validationMessage(body: unknown): string {
+  const reason = (body as ValidationBody | null)?.errors?.photo?.[0] ?? ''
+
+  if (reason.includes('larger than')) {
+    return 'Fotografija je prevelika (maks. 50 MB).'
+  }
+
+  if (reason.includes('too many pixels')) {
+    return 'Fotografija ima previše piksela. Smanjite rezoluciju kamere i pokušajte ponovo.'
+  }
+
+  if (reason.includes('HEIC')) {
+    return 'HEIC fotografije nisu podržane. Promijenite format kamere na JPEG.'
+  }
+
+  if (reason.includes('could not be read')) {
+    return 'Ovo nije ispravna fotografija ili je oštećena.'
+  }
+
+  return 'Fotografija nije prihvaćena. Podržani su JPEG, PNG i WebP do 50 MB.'
+}
+
 function uploadErrorMessage(status: number, body: unknown): string {
   if (status === 429) {
     return 'Previše slika u kratkom roku. Pokušajte kasnije.'
   }
 
-  if (status === 413 || status === 422) {
-    return 'Fotografija nije podržana ili je prevelika (maks. 50 MB, JPEG, PNG ili WebP).'
+  if (status === 413) {
+    return 'Fotografija je prevelika (maks. 50 MB).'
+  }
+
+  if (status === 422) {
+    return validationMessage(body)
+  }
+
+  if (status >= 500) {
+    return 'Server trenutno ne može primiti fotografiju. Javite organizatoru.'
   }
 
   const message = (body as ErrorBody | null)?.message
