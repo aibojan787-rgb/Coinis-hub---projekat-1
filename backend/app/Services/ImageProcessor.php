@@ -22,6 +22,7 @@ class ImageProcessor
      *
      * Re-encoding through GD drops all metadata (EXIF, GPS, device info), and
      * the orientation is applied before encoding so the output is upright.
+     * width and height are those of the web image, the one the gallery shows.
      *
      * @return array{width: int, height: int, web: string, thumb: string, download: string}
      */
@@ -32,9 +33,8 @@ class ImageProcessor
         $webEdge = (int) config('photos.web.max_edge');
         $thumbSize = (int) config('photos.thumb.size');
 
-        $web = (clone $image)
-            ->scaleDown(width: $webEdge, height: $webEdge)
-            ->encode(new WebpEncoder(quality: (int) config('photos.web.quality')));
+        $webImage = (clone $image)->scaleDown(width: $webEdge, height: $webEdge);
+        $web = $webImage->encode(new WebpEncoder(quality: (int) config('photos.web.quality')));
 
         $thumb = (clone $image)
             ->cover($thumbSize, $thumbSize)
@@ -47,8 +47,8 @@ class ImageProcessor
             ->encode(new JpegEncoder(quality: (int) config('photos.download.quality')));
 
         return [
-            'width' => $image->width(),
-            'height' => $image->height(),
+            'width' => $webImage->width(),
+            'height' => $webImage->height(),
             'web' => (string) $web,
             'thumb' => (string) $thumb,
             'download' => (string) $download,

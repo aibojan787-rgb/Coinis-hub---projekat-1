@@ -8,7 +8,7 @@ A public photo gallery for parties and events. Guests open the page on their pho
 2. When the photo is taken, the frontend uploads it right away (with a progress indicator and up to 3 retries on network errors).
 3. The backend validates the file, stores the original, and queues a job.
 4. A queue worker converts the photo to a 1600px WebP and a 400px thumbnail. EXIF data, including GPS location, is removed.
-5. The gallery polls the API every 5 seconds and shows new photos at the top.
+5. The gallery polls the API every 5 seconds and shows new photos at the top. The first gallery page returns an encrypted `updates_cursor`, and every poll answer returns the next `cursor`, so no internal ids reach the browser.
 
 ## Tech stack
 
@@ -33,7 +33,7 @@ AGENTS.md   Project goals and guidelines
 | ------ | ---------------------------- | -------------------------------------------- |
 | POST   | `/api/photos`                | Upload a photo (`photo` field). Returns 202. |
 | GET    | `/api/photos`                | Processed photos, newest first, paginated.   |
-| GET    | `/api/photos/updates`        | Photos added after `after_id`, for polling.  |
+| GET    | `/api/photos/updates`        | New photos since `cursor`, for polling.      |
 | GET    | `/api/photos/{uuid}`         | One processed photo.                         |
 | GET    | `/up`                        | Health check.                                |
 
@@ -82,6 +82,9 @@ Main environment variables (see `backend/.env.example` and `backend/deploy/.env.
 | `PHOTOS_MAX_UPLOAD_KB`     | Upload size limit in kilobytes (default 51200).           |
 | `PHOTOS_MAX_PIXELS`        | Maximum width x height (default 60,000,000).              |
 | `PHOTOS_UPLOAD_RATE_LIMIT` | Uploads per IP per hour (default 30).                     |
+| `PHOTOS_RETENTION_ENABLED` | Delete old photos every night (default true).             |
+| `PHOTOS_RETENTION_DAYS`    | Age in days after which photos are deleted (default 30).  |
+| `PHOTOS_DISK_WARNING_PERCENT` | Disk usage that logs a warning (default 90).           |
 | `VITE_API_URL`             | Backend origin, set when building the frontend.           |
 
 ## Deployment
@@ -94,6 +97,16 @@ A production deployment needs:
 - The scheduler running every minute (`php artisan schedule:run`).
 - Persistent storage for `storage/app/private` (originals) and `storage/app/public` (processed images).
 - HTTPS, because phone browsers only allow camera access on secure pages.
+
+## Retention and backups
+
+Photos older than `PHOTOS_RETENTION_DAYS` are deleted every night at 03:30 (database row and files). See what would be deleted with:
+
+```bash
+docker compose exec app php artisan app:prune-old-photos --dry-run
+```
+
+Back up the Docker setup with `bash scripts/backup.sh` (database dump plus all photos, keeps the newest 14). The cron line and the restore commands are in the script header. `backend/deploy/backup.sh` is the bare-metal version.
 
 ## Privacy
 

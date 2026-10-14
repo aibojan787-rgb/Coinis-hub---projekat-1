@@ -7,20 +7,15 @@ export interface Photo {
   created_at: string
 }
 
-export interface UpdatedPhoto extends Photo {
-  cursor_id: number
-}
-
 export interface GalleryPage {
   data: Photo[]
   links: { next: string | null }
-  latest_id: number
-  server_time: number
+  updates_cursor: string
 }
 
 export interface UpdatesPage {
-  data: UpdatedPhoto[]
-  server_time: number
+  data: Photo[]
+  cursor: string
   has_more: boolean
 }
 

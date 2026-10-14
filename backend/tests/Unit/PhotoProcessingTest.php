@@ -35,8 +35,9 @@ class PhotoProcessingTest extends TestCase
     {
         $result = (new ImageProcessor)->process($this->jpegFile(3000, 2000));
 
-        $this->assertSame(3000, $result['width']);
-        $this->assertSame(2000, $result['height']);
+        // Reported dimensions are those of the web image, not of the upload.
+        $this->assertSame(1600, $result['width']);
+        $this->assertSame(1067, $result['height']);
         $this->assertSame([1600, 1067], $this->dimensionsOf($result['web']));
         $this->assertSame(IMAGETYPE_WEBP, $this->imageTypeOf($result['web']));
     }

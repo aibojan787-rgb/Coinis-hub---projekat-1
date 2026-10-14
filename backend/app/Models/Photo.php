@@ -29,7 +29,7 @@ class Photo extends Model
         'thumb_path',
         'width',
         'height',
-        'size_bytes',
+        'web_size_bytes',
         'mime_type',
     ];
 

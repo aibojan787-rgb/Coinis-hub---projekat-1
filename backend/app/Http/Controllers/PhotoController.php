@@ -4,17 +4,19 @@ namespace App\Http\Controllers;
 
 use App\Http\Requests\StorePhotoRequest;
 use App\Http\Resources\PhotoResource;
-use App\Http\Resources\PhotoUpdateResource;
 use App\Jobs\ProcessPhotoJob;
 use App\Models\Photo;
 use Carbon\Carbon;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -75,41 +77,58 @@ class PhotoController extends Controller
 
     /**
      * List processed photos, newest first, with cursor pagination.
+     *
+     * Pages are ordered by created_at and uuid, so the page cursor contains
+     * no internal id. The `next` link is a path without host, so it is right
+     * behind any proxy. `updates_cursor` starts the polling for new photos.
      */
     public function index(): AnonymousResourceCollection
     {
         $photos = Photo::processed()
-            ->orderByDesc('id')
-            ->cursorPaginate(config('photos.per_page'));
+            ->orderByDesc('created_at')
+            ->orderByDesc('uuid')
+            ->cursorPaginate(config('photos.per_page'))
+            ->withPath(route('photos.index', absolute: false));
 
         return PhotoResource::collection($photos)->additional([
-            'latest_id' => (int) Photo::processed()->max('id'),
-            'server_time' => now()->timestamp,
+            'updates_cursor' => $this->encodeUpdatesCursor(
+                (int) Photo::processed()->max('id'),
+                now()->timestamp - (int) config('photos.updates_since_overlap_seconds'),
+            ),
         ]);
     }
 
     /**
      * Return processed photos the client has not seen yet, for polling.
      *
+     * The client sends back the `cursor` of its previous answer (the first
+     * one comes from the gallery page). It is encrypted, so guests never see
+     * internal ids. Inside are `after_id` (highest id already sent) and
+     * `since` (unix time).
+     *
      * Two workers can finish photos out of order, so a photo with a LOWER id
      * can become ready after one with a higher id. Asking only for
-     * "id greater than after_id" would miss it forever. The optional `since`
-     * (unix time) also returns every photo that finished processing at or
-     * after that moment, whatever its id. The client sends the `server_time`
-     * of its last poll (minus a small overlap) and skips photos it already has.
+     * "id greater than after_id" would miss it forever. So every photo that
+     * finished processing at or after `since` is returned too, whatever its
+     * id. `since` trails the last poll by a small overlap to cover clock
+     * rounding; the client skips photos it already has.
      *
-     * `has_more` is true when the limit cut the list short: the client must
-     * then keep its old `since` and ask again.
+     * `has_more` is true when the limit cut the list short: the next cursor
+     * then keeps the old `since`, so nothing is skipped.
      */
     public function updates(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'after_id' => ['required', 'integer', 'min:0'],
-            'since' => ['sometimes', 'integer', 'min:0'],
+            'cursor' => ['required', 'string', 'max:1000'],
         ]);
 
-        $afterId = (int) $validated['after_id'];
-        $since = isset($validated['since']) ? (int) $validated['since'] : null;
+        $cursor = $this->decodeUpdatesCursor($validated['cursor']);
+
+        if ($cursor === null) {
+            throw ValidationException::withMessages(['cursor' => 'The cursor is invalid.']);
+        }
+
+        ['after_id' => $afterId, 'since' => $since] = $cursor;
         $limit = (int) config('photos.updates_limit');
 
         $latestId = (int) Photo::processed()->max('id');
@@ -117,21 +136,24 @@ class PhotoController extends Controller
 
         $photos = Photo::processed()
             ->where(function (Builder $query) use ($afterId, $since): void {
-                $query->where('id', '>', $afterId);
-
-                if ($since !== null) {
-                    $query->orWhere('updated_at', '>=', Carbon::createFromTimestamp($since));
-                }
+                $query->where('id', '>', $afterId)
+                    ->orWhere('updated_at', '>=', Carbon::createFromTimestamp($since));
             })
             ->orderBy('id')
             ->limit($limit + 1)
             ->get();
 
         $hasMore = $photos->count() > $limit;
+        $photos = $photos->take($limit);
 
-        $response = PhotoUpdateResource::collection($photos->take($limit))
+        $nextCursor = $this->encodeUpdatesCursor(
+            max($afterId, (int) $photos->max('id')),
+            $hasMore ? $since : now()->timestamp - (int) config('photos.updates_since_overlap_seconds'),
+        );
+
+        $response = PhotoResource::collection($photos)
             ->additional([
-                'server_time' => now()->timestamp,
+                'cursor' => $nextCursor,
                 'has_more' => $hasMore,
             ])
             ->response($request);
@@ -140,6 +162,29 @@ class PhotoController extends Controller
         $response->isNotModified($request);
 
         return $response;
+    }
+
+    private function encodeUpdatesCursor(int $afterId, int $since): string
+    {
+        return Crypt::encryptString(json_encode(['after_id' => $afterId, 'since' => max(0, $since)]));
+    }
+
+    /**
+     * @return array{after_id: int, since: int}|null
+     */
+    private function decodeUpdatesCursor(string $cursor): ?array
+    {
+        try {
+            $data = json_decode(Crypt::decryptString($cursor), true);
+        } catch (DecryptException) {
+            return null;
+        }
+
+        if (! is_int($data['after_id'] ?? null) || ! is_int($data['since'] ?? null)) {
+            return null;
+        }
+
+        return ['after_id' => $data['after_id'], 'since' => $data['since']];
     }
 
     /**

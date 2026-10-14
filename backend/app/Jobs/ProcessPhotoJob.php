@@ -48,7 +48,7 @@ class ProcessPhotoJob implements ShouldQueue
             'thumb_path' => $thumbPath,
             'width' => $result['width'],
             'height' => $result['height'],
-            'size_bytes' => strlen($result['web']),
+            'web_size_bytes' => strlen($result['web']),
         ]);
 
         $this->removeOriginalUnlessKept();

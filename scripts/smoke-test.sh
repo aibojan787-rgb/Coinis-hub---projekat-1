@@ -165,13 +165,19 @@ fi
 step "2. Gallery API"
 
 request list "$BASE/api/photos" -H 'Accept: application/json'
-LATEST_BEFORE=""
-if [ "$STATUS" = "200" ] && jget "$WORK/list.body" data >/dev/null && LATEST_BEFORE="$(jget "$WORK/list.body" latest_id)"; then
-    ok "GET /api/photos returns a data list and latest_id (latest_id = $LATEST_BEFORE)"
+CURSOR_BEFORE=""
+if [ "$STATUS" = "200" ] && jget "$WORK/list.body" data >/dev/null && CURSOR_BEFORE="$(jget "$WORK/list.body" updates_cursor)"; then
+    ok "GET /api/photos returns a data list and updates_cursor"
 else
-    bad "GET /api/photos returns a data list and latest_id" "got HTTP $STATUS"
-    LATEST_BEFORE=0
+    bad "GET /api/photos returns a data list and updates_cursor" "got HTTP $STATUS"
 fi
+
+NEXT_LINK="$(jget "$WORK/list.body" links.next || true)"
+case "$NEXT_LINK" in
+    None|"") ok "pagination link is a path (only one page, nothing to check)" ;;
+    /api/photos\?cursor=*) ok "pagination link is a path without host" ;;
+    *) bad "pagination link is a path without host" "got $NEXT_LINK" ;;
+esac
 
 if [ "$(header list x-content-type-options)" = "nosniff" ]; then
     ok "security headers are present"
@@ -181,9 +187,16 @@ fi
 
 request updates_bad "$BASE/api/photos/updates" -H 'Accept: application/json'
 if [ "$STATUS" = "422" ]; then
-    ok "GET /api/photos/updates without after_id is rejected (422)"
+    ok "GET /api/photos/updates without a cursor is rejected (422)"
 else
-    bad "GET /api/photos/updates without after_id is rejected (422)" "got HTTP $STATUS"
+    bad "GET /api/photos/updates without a cursor is rejected (422)" "got HTTP $STATUS"
+fi
+
+request updates_forged "$BASE/api/photos/updates?cursor=eyJhZnRlcl9pZCI6MH0" -H 'Accept: application/json'
+if [ "$STATUS" = "422" ]; then
+    ok "GET /api/photos/updates with a forged cursor is rejected (422)"
+else
+    bad "GET /api/photos/updates with a forged cursor is rejected (422)" "got HTTP $STATUS"
 fi
 
 request unknown "$BASE/api/photos/00000000-0000-4000-8000-000000000000" -H 'Accept: application/json'
@@ -299,7 +312,7 @@ else
             bad "the photo shows up in the gallery list"
         fi
 
-        request updates "$BASE/api/photos/updates?after_id=$LATEST_BEFORE" -H 'Accept: application/json'
+        request updates "$BASE/api/photos/updates" --get --data-urlencode "cursor=$CURSOR_BEFORE" -H 'Accept: application/json'
         if [ "$STATUS" = "200" ] && list_has "$WORK/updates.body" data uuid "$UUID"; then
             ok "the photo shows up in the live-update feed"
         else
@@ -308,7 +321,7 @@ else
 
         ETAG="$(header updates etag)"
         if [ -n "$ETAG" ]; then
-            request updates304 "$BASE/api/photos/updates?after_id=$LATEST_BEFORE" -H 'Accept: application/json' -H "If-None-Match: $ETAG"
+            request updates304 "$BASE/api/photos/updates" --get --data-urlencode "cursor=$CURSOR_BEFORE" -H 'Accept: application/json' -H "If-None-Match: $ETAG"
             if [ "$STATUS" = "304" ]; then
                 ok "unchanged live-update feed answers 304 (saves bandwidth)"
             else

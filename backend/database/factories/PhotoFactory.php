@@ -28,7 +28,7 @@ class PhotoFactory extends Factory
             'thumb_path' => "photos/{$uuid}/thumb.webp",
             'width' => 1600,
             'height' => 1200,
-            'size_bytes' => 150_000,
+            'web_size_bytes' => 150_000,
             'mime_type' => 'image/jpeg',
         ];
     }
@@ -44,7 +44,7 @@ class PhotoFactory extends Factory
             'thumb_path' => null,
             'width' => null,
             'height' => null,
-            'size_bytes' => null,
+            'web_size_bytes' => null,
         ]);
     }
 

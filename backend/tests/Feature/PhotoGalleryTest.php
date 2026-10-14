@@ -12,7 +12,7 @@ class PhotoGalleryTest extends TestCase
 
     public function test_gallery_lists_only_processed_photos_newest_first(): void
     {
-        $older = Photo::factory()->create();
+        $older = Photo::factory()->create(['created_at' => now()->subMinute()]);
         Photo::factory()->pending()->create();
         Photo::factory()->failed()->create();
         $newer = Photo::factory()->create();
@@ -24,23 +24,50 @@ class PhotoGalleryTest extends TestCase
         $response->assertJsonPath('data.1.uuid', $older->uuid);
     }
 
-    public function test_gallery_returns_the_latest_processed_id_for_polling(): void
+    public function test_photos_uploaded_in_the_same_second_are_still_paged_without_gaps_or_repeats(): void
     {
-        Photo::factory()->create();
-        $newest = Photo::factory()->create();
-        Photo::factory()->pending()->create();
+        config(['photos.per_page' => 2]);
+        $this->freezeSecond();
+        $created = Photo::factory()->count(5)->create();
 
-        $this->getJson('/api/photos')->assertJsonPath('latest_id', $newest->id);
+        $seen = [];
+        $path = '/api/photos';
+
+        while ($path !== null) {
+            $response = $this->getJson($path)->assertOk();
+            $seen = [...$seen, ...collect($response->json('data'))->pluck('uuid')->all()];
+            $path = $response->json('links.next');
+        }
+
+        $this->assertCount(5, $seen);
+        $this->assertEqualsCanonicalizing($created->pluck('uuid')->all(), $seen);
     }
 
-    public function test_gallery_returns_24_photos_per_page_with_a_cursor(): void
+    public function test_gallery_returns_24_photos_per_page_with_a_relative_next_link(): void
     {
         Photo::factory()->count(30)->create();
 
         $response = $this->getJson('/api/photos');
 
         $response->assertOk()->assertJsonCount(24, 'data');
-        $this->assertNotNull($response->json('links.next'));
+
+        // A path, never an absolute URL: behind a proxy the host would be wrong.
+        $this->assertStringStartsWith('/api/photos?cursor=', $response->json('links.next'));
+        $this->assertSame('/api/photos', $response->json('meta.path'));
+
+        $this->getJson($response->json('links.next'))->assertOk()->assertJsonCount(6, 'data');
+    }
+
+    public function test_page_cursor_contains_no_internal_id(): void
+    {
+        Photo::factory()->count(3)->create();
+        config(['photos.per_page' => 1]);
+
+        $cursor = $this->getJson('/api/photos')->json('meta.next_cursor');
+        $decoded = json_decode(base64_decode(strtr($cursor, '-_', '+/')), true);
+
+        $this->assertArrayNotHasKey('id', $decoded);
+        $this->assertArrayHasKey('uuid', $decoded);
     }
 
     public function test_gallery_resource_exposes_public_fields_only(): void
@@ -84,32 +111,32 @@ class PhotoGalleryTest extends TestCase
         Photo::factory()->pending()->create();
         $third = Photo::factory()->create();
 
-        $response = $this->getJson("/api/photos/updates?after_id={$second->id}");
+        $response = $this->getJson($this->updatesUrl($second->id, now()->addMinute()->timestamp));
 
         $response->assertOk()->assertJsonCount(1, 'data');
         $response->assertJsonPath('data.0.uuid', $third->uuid);
-        $response->assertJsonPath('data.0.cursor_id', $third->id);
         $this->assertNotSame($first->uuid, $response->json('data.0.uuid'));
     }
 
-    public function test_updates_requires_after_id(): void
+    public function test_updates_require_a_cursor(): void
     {
         $this->getJson('/api/photos/updates')
             ->assertUnprocessable()
-            ->assertJsonValidationErrorFor('after_id');
+            ->assertJsonValidationErrorFor('cursor');
     }
 
     public function test_updates_return_304_when_nothing_changed(): void
     {
         Photo::factory()->create();
+        $url = $this->updatesUrl(0);
 
-        $first = $this->getJson('/api/photos/updates?after_id=0');
+        $first = $this->getJson($url);
         $etag = $first->headers->get('ETag');
 
         $this->assertNotNull($etag);
 
         $this->withHeader('If-None-Match', $etag)
-            ->getJson('/api/photos/updates?after_id=0')
+            ->getJson($url)
             ->assertStatus(304);
     }
 

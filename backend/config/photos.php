@@ -76,7 +76,33 @@ return [
 
     'updates_limit' => 100,
 
+    // Each poll also returns photos that finished this many seconds before
+    // the previous poll (covers clock rounding; the client skips duplicates).
+    'updates_since_overlap_seconds' => 30,
+
     // Photos stuck in "pending" longer than this are marked as failed.
     'stale_pending_minutes' => 60,
+
+    /*
+    |--------------------------------------------------------------------------
+    | Retention and disk space
+    |--------------------------------------------------------------------------
+    |
+    | Every night, photos older than `days` are deleted: the database row and
+    | both folders (private and public). Set PHOTOS_RETENTION_ENABLED=false to
+    | keep everything, for example during a long event. Check what would be
+    | deleted with: php artisan app:prune-old-photos --dry-run
+    |
+    | disk_warning_percent: the hourly disk check logs a warning when the
+    | storage disk is at least this full.
+    |
+    */
+
+    'retention' => [
+        'enabled' => filter_var(env('PHOTOS_RETENTION_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'days' => (int) env('PHOTOS_RETENTION_DAYS', 30),
+    ],
+
+    'disk_warning_percent' => (int) env('PHOTOS_DISK_WARNING_PERCENT', 90),
 
 ];

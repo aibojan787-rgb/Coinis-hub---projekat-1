@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Nightly backup: database dump plus stored photos. Keeps 14 days.
 # Run from cron as root, e.g. 0 3 * * * /var/www/photo-gallery/current/backend/deploy/backup.sh
+# This is for the bare-metal install. For the Docker setup use scripts/backup.sh.
 set -euo pipefail
 
 APP_DIR=/var/www/photo-gallery/current/backend

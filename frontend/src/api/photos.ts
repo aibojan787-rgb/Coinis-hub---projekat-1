@@ -39,20 +39,6 @@ function resolveUrl(path: string): string {
   return `${API_BASE}${path}`
 }
 
-/**
- * Pagination links come back as absolute URLs from the backend. Keep only the
- * path and query so requests go through the same origin as everything else.
- */
-function toApiPath(url: string): string {
-  if (!url.startsWith('http')) {
-    return url
-  }
-
-  const parsed = new URL(url)
-
-  return `${parsed.pathname}${parsed.search}`
-}
-
 async function getJson<T>(path: string): Promise<T | null> {
   const response = await fetch(resolveUrl(path), { headers: { Accept: 'application/json' } })
 
@@ -67,16 +53,20 @@ async function getJson<T>(path: string): Promise<T | null> {
   return (await response.json()) as T
 }
 
+/**
+ * `path` is the first page or a `links.next` path from the previous page
+ * (the backend sends paths without host, so they work behind any proxy).
+ */
 export function fetchGalleryPage(path = '/api/photos'): Promise<GalleryPage | null> {
-  return getJson<GalleryPage>(toApiPath(path))
+  return getJson<GalleryPage>(path)
 }
 
 /**
- * `since` (unix time) also returns photos that finished processing after that
- * moment even if their id is lower than `afterId` (workers finish out of order).
+ * `cursor` is opaque: the first one comes from the gallery page, every next
+ * one from the previous updates answer.
  */
-export function fetchUpdates(afterId: number, since: number): Promise<UpdatesPage | null> {
-  return getJson<UpdatesPage>(`/api/photos/updates?after_id=${afterId}&since=${Math.max(0, Math.floor(since))}`)
+export function fetchUpdates(cursor: string): Promise<UpdatesPage | null> {
+  return getJson<UpdatesPage>(`/api/photos/updates?cursor=${encodeURIComponent(cursor)}`)
 }
 
 export async function fetchPhoto(uuid: string): Promise<Photo | null> {

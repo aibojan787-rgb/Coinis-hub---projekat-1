@@ -1,12 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { fetchGalleryPage, fetchUpdates } from '../api/photos'
+import { ApiError, fetchGalleryPage, fetchUpdates } from '../api/photos'
 import type { Photo } from '../types'
 
 export const POLL_INTERVAL_MS = 5000
-
-// Each poll also asks for photos that finished this many seconds before the
-// last poll. This covers clock rounding; photos already shown are skipped.
-const SINCE_OVERLAP_SECONDS = 30
 
 function prependNewest(current: Photo[], incoming: Photo[]): Photo[] {
   const known = new Set(current.map((photo) => photo.uuid))
@@ -26,8 +22,9 @@ export function useGallery() {
   const [nextPath, setNextPath] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [hasError, setHasError] = useState(false)
-  const latestIdRef = useRef(0)
-  const sinceRef = useRef(0)
+  // Opaque polling position from the server. It may return a photo again
+  // (late finishers overlap), so incoming photos are deduplicated by uuid.
+  const cursorRef = useRef<string | null>(null)
   const isLoadingMoreRef = useRef(false)
 
   useEffect(() => {
@@ -39,8 +36,7 @@ export function useGallery() {
           return
         }
 
-        latestIdRef.current = page.latest_id
-        sinceRef.current = page.server_time
+        cursorRef.current = page.updates_cursor
         setPhotos(page.data)
         setNextPath(page.links.next)
         setHasError(false)
@@ -61,37 +57,45 @@ export function useGallery() {
     }
   }, [])
 
-  // Polling starts only after the first page is loaded, so latestIdRef is set.
+  // Polling starts only after the first page is loaded, so cursorRef is set.
   useEffect(() => {
     if (isLoading) {
       return
     }
 
     const poll = async () => {
-      if (document.hidden) {
+      const cursor = cursorRef.current
+
+      if (document.hidden || !cursor) {
         return
       }
 
       try {
-        const updates = await fetchUpdates(latestIdRef.current, sinceRef.current - SINCE_OVERLAP_SECONDS)
+        const updates = await fetchUpdates(cursor)
 
         if (!updates) {
           return
         }
 
-        // When the answer was cut short, keep the old moment so nothing is skipped.
-        if (!updates.has_more) {
-          sinceRef.current = updates.server_time
-        }
+        cursorRef.current = updates.cursor
 
         if (updates.data.length === 0) {
           return
         }
 
-        latestIdRef.current = Math.max(latestIdRef.current, ...updates.data.map((photo) => photo.cursor_id))
         setPhotos((current) => prependNewest(current, updates.data))
-      } catch {
-        // Keep the current gallery; the next tick tries again.
+      } catch (error) {
+        // The server no longer accepts the cursor (e.g. a new APP_KEY after a
+        // deploy): start over from the first page. Otherwise keep the current
+        // gallery; the next tick tries again.
+        if (error instanceof ApiError && error.status === 422) {
+          const page = await fetchGalleryPage().catch(() => null)
+
+          if (page) {
+            cursorRef.current = page.updates_cursor
+            setPhotos((current) => prependNewest(current, [...page.data].reverse()))
+          }
+        }
       }
     }
 
