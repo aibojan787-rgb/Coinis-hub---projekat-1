@@ -35,7 +35,9 @@ return [
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),
-            'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+            // Root-relative so image links work from any host the app is reached
+            // through (tailnet, public reverse proxy), not just APP_URL.
+            'url' => '/storage',
             'visibility' => 'public',
             'throw' => true,
             'report' => false,

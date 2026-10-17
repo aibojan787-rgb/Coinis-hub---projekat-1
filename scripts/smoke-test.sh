@@ -284,7 +284,9 @@ else
 
         EXPECTED_AUTHORITY="$(authority_of "$BASE")"
         ACTUAL_AUTHORITY="$(authority_of "$WEB_URL")"
-        if [ "$EXPECTED_AUTHORITY" = "$ACTUAL_AUTHORITY" ]; then
+        if [ -z "$ACTUAL_AUTHORITY" ]; then
+            ok "image URLs are root-relative and work on any host"
+        elif [ "$EXPECTED_AUTHORITY" = "$ACTUAL_AUTHORITY" ]; then
             ok "image URLs point at the address you are testing ($ACTUAL_AUTHORITY)"
         else
             warn "image URLs point at a different address" "tested $EXPECTED_AUTHORITY but the app builds links for $ACTUAL_AUTHORITY. If guests use $EXPECTED_AUTHORITY, fix APP_URL in .env"
